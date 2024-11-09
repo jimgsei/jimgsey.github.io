@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HLS Player</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <video id="video" controls autoplay style="width: 80%; height: auto;"></video>
+  <script>
+    if (Hls.isSupported()) {
+      const video = document.getElementById('video');
+      const hls = new Hls();
+      hls.loadSource('https://iezmzlrgtn5pgme.ngolpdkyoctjcddxshli469r.org/sunshine/ttVa45D5zqhcBkrYvA6EZYhhgYsUGLGZdFwakVUeJFtRmQFhZa2bhvkHGAinOnVc9YCftpNW73rWKWQ1nILn5Zc6CZVJgALfPzlFCw-pT5idkwyFMtBX2PxgFw4JGSHRTILbbAhf0Fno6rqkFpugerwxWfhB6_Mlb6zEmarijdA/hls/index.m3u8');
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        video.play();
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = 'https://iezmzlrgtn5pgme.ngolpdkyoctjcddxshli469r.org/sunshine/ttVa45D5zqhcBkrYvA6EZYhhgYsUGLGZdFwakVUeJFtRmQFhZa2bhvkHGAinOnVc9YCftpNW73rWKWQ1nILn5Zc6CZVJgALfPzlFCw-pT5idkwyFMtBX2PxgFw4JGSHRTILbbAhf0Fno6rqkFpugerwxWfhB6_Mlb6zEmarijdA/hls/index.m3u8';
+      video.addEventListener('loadedmetadata', function() {
+        video.play();
+      });
+    }
+  </script>
+</body>
+</html>
