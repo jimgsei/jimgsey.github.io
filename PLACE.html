@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor de Licitaciones</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h2 {
+            text-align: center;
+        }
+        .filter-container, .load-more-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 800px;
+        }
+        .filter-container input, .filter-container select, .filter-container button,
+        .load-more-container input, .load-more-container button {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            overflow-x: auto;
+            display: block;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+        }
+        @media (max-width: 100px) {
+            table, th, td {
+                font-size: 9px;
+            }
+            .filter-container, .load-more-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            .filter-container input, .filter-container select, .filter-container button,
+            .load-more-container input, .load-more-container button {
+                width: 100%;
+            }
+            table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+        }
+        .document-list {
+            display: none;
+        }
+        .toggle-button {
+            cursor: pointer;
+            background-color: #28a745;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .progress-indicator {
+            margin-top: 10px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .error-message {
+            color: red;
+            font-weight: bold;
+            margin-top: 20px;
+            text-align: center;
+        }
+        .atom-link {
+            margin-bottom: 20px;
+            font-size: 16px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .atom-link:hover {
+            text-decoration: underline;
+        }
+        .ver-licitacion-button {
+            background-color: #007bff;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            text-decoration: none;
+            display: inline-block;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        const initialFeedUrl = "https://contrataciondelestado.es/sindicacion/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom";
+        const proxyUrl = "https://corsmirror.com/v1?url="; // Proxy CORS
+
+        let allEntries = [];
+        let nextFeedUrl = initialFeedUrl;
+        let isProcessing = false;
+
+        const estadoMapping = {
+            "PRE": "Anuncio Previo",
+            "PUB": "EN PLAZO",
+            "EV": "PENDIENTE DE ADJUDICACION",
+            "ADJ": "Adjudicada",
+            "RES": "Resuelta",
+            "ANUL": "Anulada"
+        };
+
+        function formatDate(dateString) {
+            if (!dateString || dateString === "N/A") return "N/A";
+            const date = new Date(dateString);
+            if (isNaN(date)) return "N/A";
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(proxyUrl + url, { // Usar proxy CORS
+                    ...options,
+                    signal: controller.signal,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+                    }
+                });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                throw error;
+            }
+        }
+
+        const checkNewFeed = async () => {
+            if (isProcessing) return;
+            isProcessing = true;
+            try {
+                document.getElementById("status").innerText = "🔍 Cargando datos...";
+                document.getElementById("status").style.display = "block";
+                document.getElementById("error").innerText = "";
+                await loadFeedsInBatches(1);
+                document.getElementById("status").style.display = "none";
+            } catch (error) {
+                console.error(error);
+                document.getElementById("error").innerText = `❌ Error en checkNewFeed: ${error.message}`;
+            } finally {
+                isProcessing = false;
+            }
+        };
+
+        async function loadMoreFeeds() {
+            if (isProcessing) return;
+            isProcessing = true;
+            try {
+                document.getElementById("status").innerText = "🔍 Cargando más datos...";
+                document.getElementById("status").style.display = "block";
+                document.getElementById("error").innerText = "";
+                const maxFeeds = parseInt(document.getElementById("maxFeedsInput").value) || 1;
+                await loadFeedsInBatches(maxFeeds);
+                document.getElementById("status").style.display = "none";
+            } catch (error) {
+                console.error(error);
+                document.getElementById("error").innerText = `❌ Error en loadMoreFeeds: ${error.message}`;
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        async function loadFeedsInBatches(maxFeeds) {
+            let feedCount = 0;
+            let currentFeedUrl = nextFeedUrl;
+            while (currentFeedUrl && feedCount < maxFeeds) {
+                document.getElementById("progress").innerText = `Cargando historial ${feedCount + 1}...`;
+                try {
+                    const response = await fetchWithTimeout(currentFeedUrl);
+                    if (!response.ok) {
+                        throw new Error(`No se pudo obtener el historial: ${currentFeedUrl}. Estado: ${response.status}`);
+                    }
+                    const text = await response.text();
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(text, "text/xml");
+                    const feedEntries = Array.from(xmlDoc.querySelectorAll("entry"));
+                    allEntries.push(...feedEntries);
+                    const nextLink = xmlDoc.querySelector('link[rel="next"]');
+                    currentFeedUrl = nextLink ? nextLink.getAttribute("href") : null;
+                    feedCount++;
+                    if (feedCount % 1 === 0) {
+                        fetchAndDisplayLicitaciones(allEntries);
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                } catch (error) {
+                    console.error(error);
+                    document.getElementById("error").innerText = `❌ Error en loadFeedsInBatches: ${error.message}`;
+                    throw error;
+                }
+            }
+            nextFeedUrl = currentFeedUrl;
+            fetchAndDisplayLicitaciones(allEntries);
+        }
+
+        function fetchAndDisplayLicitaciones(entries) {
+            try {
+                const atomLinkElement = document.getElementById("atomLink");
+                atomLinkElement.href = nextFeedUrl || initialFeedUrl;
+                atomLinkElement.innerText = `Ver Atom más actual (${nextFeedUrl ? "Cargado" : "Inicial"})`;
+                let tableContent = "<tr><th>Título</th><th>CPV</th><th>Importe</th><th>Procedimiento</th><th>Cliente</th><th>Nº Expediente</th><th>Fecha del Anuncio</th><th>Fecha Final</th><th>Estado</th><th>Fecha</th><th>Enlace</th><th>Documentos</th></tr>";
+                const procedureCodeMapping = {
+                    "1": "Abierto",
+                    "2": "Restringido",
+                    "3": "Negociado con Publicidad",
+                    "4": "Negociado sin Publicidad",
+                    "5": "Diálogo Competitivo",
+                    "6": "Contrato Menor",
+                    "7": "Asociación para la Innovación",
+                    "8": "Subasta Electrónica",
+                    "9": "Concurso de Proyectos"
+                };
+                const cpvFilter = document.getElementById("cpvFilter").value.toLowerCase();
+                const importeFilter = parseFloat(document.getElementById("importeFilter").value) || 0;
+                const clienteFilter = document.getElementById("clienteFilter").value.toLowerCase();
+                const expedienteFilter = document.getElementById("expedienteFilter").value.toLowerCase();
+                const estadoFilter = document.getElementById("estadoFilter").value;
+                entries.forEach(entry => {
+                    const title = entry.querySelector("title")?.textContent || "N/A";
+                    const updated = entry.querySelector("updated")?.textContent || "N/A";
+                    const link = entry.querySelector("link")?.getAttribute("href") || "#";
+                    const importeElement = entry.getElementsByTagName("cbc:TotalAmount")[0];
+                    const importe = importeElement ? parseFloat(importeElement.textContent) : 0;
+                    const clienteElement = entry.getElementsByTagName("cac:PartyName")[0];
+                    const clienteName = clienteElement ? clienteElement.getElementsByTagName("cbc:Name")[0]?.textContent : "N/A";
+                    const buyerProfileElement = entry.getElementsByTagName("cbc:BuyerProfileURIID")[0];
+                    const buyerProfile = buyerProfileElement 
+                        ? `<a href='${buyerProfileElement.textContent}' target='_blank' class='toggle-button'>Ver Perfil</a>` 
+                        : "N/A";
+                    const cliente = `${clienteName}<br>${buyerProfile}`;
+                    const cpvElements = entry.getElementsByTagName("cbc:ItemClassificationCode");
+                    const cpvs = Array.from(cpvElements).map(el => el.textContent.toLowerCase());
+                    const documentElements = entry.getElementsByTagName("cac:ExternalReference");
+                    const documentos = Array.from(documentElements).map((doc, index) => {
+                        const uriElement = doc.getElementsByTagName("cbc:URI")[0];
+                        return uriElement ? `<a href='${uriElement.textContent}' target='_blank'>Documento ${index + 1}</a>` : "";
+                    });
+                    const documentosHTML = documentos.length > 0 ? `<button class='toggle-button' onclick='toggleVisibility(this)'>Mostrar Documentos</button><div class='document-list'>${documentos.join("<br>")}</div>` : "N/A";
+                    const procedureCodeElement = entry.getElementsByTagName("cbc:ProcedureCode")[0];
+                    const procedureCode = procedureCodeElement ? procedureCodeMapping[procedureCodeElement.textContent] || "N/A" : "N/A";
+                    const contractNotificationElement = entry.getElementsByTagName("cbc:ContractFolderID")[0];
+                    const contractNotification = contractNotificationElement ? contractNotificationElement.textContent : "N/A";
+                    const additionalPublicationElement = entry.getElementsByTagName("cac-place-ext:AdditionalPublicationDocumentReference")[0];
+                    const fechaAnuncio = additionalPublicationElement 
+                        ? formatDate(additionalPublicationElement.getElementsByTagName("cbc:IssueDate")[0]?.textContent)
+                        : "N/A";
+                    const tenderDeadlineElement = entry.getElementsByTagName("cac:TenderSubmissionDeadlinePeriod")[0];
+                    const fechaFinal = tenderDeadlineElement 
+                        ? formatDate(tenderDeadlineElement.getElementsByTagName("cbc:EndDate")[0]?.textContent)
+                        : "N/A";
+                    const estadoElement = entry.getElementsByTagName("cbc-place-ext:ContractFolderStatusCode")[0];
+                    const estadoCode = estadoElement ? estadoElement.textContent : "N/A";
+                    const estado = estadoMapping[estadoCode] || "N/A";
+                    if ((cpvFilter === "" || cpvs.some(cpv => cpv.includes(cpvFilter))) &&
+                        (importe >= importeFilter) &&
+                        (clienteFilter === "" || clienteName.toLowerCase().includes(clienteFilter)) &&
+                        (expedienteFilter === "" || contractNotification.toLowerCase().includes(expedienteFilter)) &&
+                        (estadoFilter === "" || estado === estadoFilter)) {
+                        tableContent += `<tr>
+                            <td>${title}</td>
+                            <td>${cpvs.join(", ") || "N/A"}</td>
+                            <td>${importe}</td>
+                            <td>${procedureCode}</td>
+                            <td>${cliente}</td>
+                            <td>${contractNotification}</td>
+                            <td>${fechaAnuncio}</td>
+                            <td>${fechaFinal}</td>
+                            <td>${estado}</td>
+                            <td>${updated}</td>
+                            <td><a href='${link}' target='_blank' class='ver-licitacion-button'>Ver Licitación</a></td>
+                            <td>${documentosHTML}</td>
+                        </tr>`;
+                    }
+                });
+                document.getElementById("licitacionesTable").innerHTML = tableContent;
+            } catch (error) {
+                console.error(error);
+                document.getElementById("error").innerText = `❌ Error en fetchAndDisplayLicitaciones: ${error.message}`;
+            }
+        }
+
+        function toggleVisibility(button) {
+            const content = button.nextElementSibling;
+            content.style.display = content.style.display === "block" ? "none" : "block";
+        }
+
+        window.onload = checkNewFeed;
+    </script>
+</head>
+<body>
+    <h2>Monitor de Licitaciones</h2>
+    <div class="filter-container">
+        <input type="text" id="cpvFilter" placeholder="Código CPV">
+        <input type="text" id="importeFilter" placeholder="Importe mínimo">
+        <input type="text" id="clienteFilter" placeholder="Cliente">
+        <input type="text" id="expedienteFilter" placeholder="Nº de Expediente">
+        <select id="estadoFilter">
+            <option value="">Todos los estados</option>
+            <option value="Anuncio Previo">Anuncio Previo</option>
+            <option value="EN PLAZO">EN PLAZO</option>
+            <option value="PENDIENTE DE ADJUDICACION">PENDIENTE DE ADJUDICACION</option>
+            <option value="Adjudicada">Adjudicada</option>
+            <option value="Resuelta">Resuelta</option>
+            <option value="Anulada">Anulada</option>
+        </select>
+        <button onclick="checkNewFeed()">Aplicar Filtros</button>
+    </div>
+    <div class="load-more-container">
+        <input type="number" id="maxFeedsInput" placeholder="Número de historial a cargar" min="1" value="1">
+        <button onclick="loadMoreFeeds()">Cargar más historial</button>
+        <div id="progress" class="progress-indicator"></div>
+    </div>
+    <p id="status" style="display: none;">🔍 Cargando datos...</p>
+    <p id="error" class="error-message"></p>
+    <a id="atomLink" class="atom-link" href="#" target="_blank">Ver Atom más actual</a>
+    <h3>Licitaciones:</h3>
+    <table border="1" id="licitacionesTable"></table>
+</body>
+</html>
